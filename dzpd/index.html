@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+		<meta http-equiv="Pragma" content="no-cache">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+		<!-- 第三方支持库JS -->
+		<script src="https://cdn.bootcdn.net/ajax/libs/vue/2.7.14/vue.min.js"></script>
+		<script src="https://cdn.bootcdn.net/ajax/libs/axios/1.5.0/axios.js"></script>
+		<script src="https://cdn.bootcdn.net/ajax/libs/clipboard.js/2.0.11/clipboard.min.js"></script>
+		<script src="https://cdn.bootcdn.net/ajax/libs/vConsole/3.15.1/vconsole.min.js"></script>
+		<!-- 引入vant -->
+		<link href="https://cdn.bootcdn.net/ajax/libs/vant/2.12.54/index.min.css" rel="stylesheet">
+		<script src="https://cdn.bootcdn.net/ajax/libs/vant/2.12.54/vant.min.js"></script>
+		<title>CDKEY领取中心</title>
+	</head>
+	<body>
+		<div id="app">
+			<img :src="imgData.topBig" alt="" class="topBig" />
+
+			<!-- 内容视图 -->
+			<div class="centerView">
+				<van-tabs v-model="active.tab" class="tab">
+					<van-tab title="首页">
+						<div class="home">
+							<div class="btn">
+								<van-button size="normal" class="btnReceive" @click="exchange">立即领取</van-button>
+								<van-button size="normal" class="btnShare" @click="show.share = true">邀请朋友</van-button>
+							</div>
+
+							<div class="info">
+								<span class="title">领取次数</span>
+								<span class="num">{{config.num}}</span>
+								<span class="f5" @click="f5(0)">刷新</span>
+							</div>
+
+							<img :src="imgData.help" alt="" class="help" />
+						</div>
+					</van-tab>
+
+					<van-tab title="助力记录" class="powerList">
+						<div v-if="config.underUser.length === 0" class="empty">
+							<van-empty :image="imgData.emo" description="糟糕！！居然还没有人帮你助力" />
+						</div>
+
+						<div v-else>
+							<div v-for="(item, index) in config.underUser" :key="index" class="data" >
+								<div class="listLeft">
+									<van-image round src="https://party.res.netease.com/pc/gw/20230509182436/img/b_bmrr_791341b0.png" class="img" />
+								</div>
+
+								<div class="listRhigt">
+									<span class="user">uid:&nbsp;{{ item.user }}</span>
+									<span class="time"><br/>{{ formatTime(item.time) }}</span>
+								</div>
+							</div>
+						</div>
+					</van-tab>
+
+					<van-tab title="" disabled>内容 3</van-tab>
+				</van-tabs>
+			</div>
+
+			<van-popup v-model="show.share" closeable close-icon-position="top-left" class="shareMain">
+				<div class="block">
+					<span>&nbsp;&nbsp;复制链接分享给好友，好友成功助力后可获得领取机会。</span>
+					<img :src="imgData.copy" alt="" class="copyShreUrl" @click="copyShreUrl" />
+				</div>
+			</van-popup>
+
+			<van-popup v-model="show.power" class="powerMain" :close-on-click-overlay="false">
+				<div class="block">
+					<span>&nbsp;&nbsp;&nbsp;&nbsp;你的好友发来助力请求,是否帮助?每个蛋宝只能助力一次!<br> </span>
+					<div class="btn">
+						<van-button type="primary" size="mini" @click="btnPower" class="btn1">帮TA助力</van-button>
+						<van-button type="warning" size="mini" @click="show.power = false" class="btn2">算了</van-button>
+					</div>
+				</div>
+			</van-popup>
+
+			<van-popup v-model="show.powerSucceed" class="powerSucceedMain" :close-on-click-overlay="false">
+				<div class="block">
+					<span>友谊的小船又近了一步,感谢你的助力!</span>
+					<van-button type="primary" size="normal" class="btnPowerSucceedMain"
+						@click="show.powerSucceed = false">我也要参与</van-button>
+				</div>
+			</van-popup>
+
+		</div>
+
+		<script>
+			// var vConsole = new VConsole();
+			let app = new Vue({
+				el: '#app',
+				data: {
+					code: 200,
+					imgData: {
+						topBig: './img/home1.jpg',
+						help: './img/help.png',
+						copy: './img/copy.png',
+						emo: './img/emo.png'
+					},
+					active: {
+						tab: 0
+					},
+					show: {
+						share: false, //分享
+						power: false, //助力
+						powerSucceed: false //助力成功
+					}, //视图展示
+					config: {
+						num: 0, //领取次数
+						uid: '', //用户uid
+						group: '414567645', //
+						shareText: 'share',
+						above: '', //上级用户uid
+						underUser: [], //谁给我助力了？ 里面包含: {"user":"351827397","time":1704081827392}
+						urlGame: 'https://dp1.game.163.com/open/party/',
+						imgUrl: 'https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/'
+					}
+				},
+				mounted() {
+					this.settingImgData()
+					this.main()
+				},
+				methods: {
+					async main() {
+						// 初始化
+						// 提取链接
+						const urlParams = new URLSearchParams(window.location.search)
+						this.config.above = urlParams.get('above')
+						const t = urlParams.get('t')
+						// 提取自身uid
+						const getConfig = await axios({
+							method: 'post',
+							url: 'http://cdk.dsw.beauty',
+							data: JSON.stringify({
+								"func": "enrollUser"
+							})
+						})
+
+						if (getConfig.data.code === 200 || getConfig.data.code === 201) {
+							this.config.uid = getConfig.data.res //自身的uid 
+							console.log('你的uid：' + this.config.uid, '上级的UID: ' + this.config.above)
+							if (typeof this.config.above !== 'undefined' && this.config.above !== null) {
+								this.show.power = true; // 询问时候助力的提示
+							}
+							await this.f5(2)
+						} else {
+							vant.Dialog.alert({
+								title: '本期活动结束啦',
+								message: '本期活动已经结束，加入粉丝后援会交流群享受第一情报活动。',
+								confirmButtonText: '立即加入QQ群'
+							}).then(() => {
+								this.toQQGroup()
+							})
+						}
+					},
+					settingImgData() {
+						// 设置图片数据
+						Object.keys(this.imgData).forEach(key => {
+							this.imgData[key] = this.config.imgUrl + this.imgData[key];
+						})
+					},
+					async f5(index) {
+						vant.Toast.loading({
+							message: '刷新中',
+							forbidClick: true,
+							duration: 0
+						})
+						const findLz = await axios({
+							method: 'post',
+							url: 'http://cdk.dsw.beauty',
+							data: JSON.stringify({
+								"func": "findLz",
+								"IP": this.config.uid
+							})
+						})
+						this.config.num = findLz.data.res.lz
+						this.config.underUser = findLz.data.res.underUser
+						// console.log(findLz.data.res.underUser)
+						vant.Toast.clear()
+						index === 0 ? vant.Toast('刷新完成') : null //传参0提示刷新次数 否则不提示
+					},
+					async btnPower() {
+						// 确定助力
+						const bindAbove = await axios({
+							method: 'post',
+							url: 'http://cdk.dsw.beauty',
+							data: JSON.stringify({
+								"func": "bindAbove",
+								"IP": this.config.uid,
+								"aboveIP": this.config.above
+							})
+						})
+						this.show.power = false
+						if (bindAbove.data.code !== 200) {
+							vant.Dialog.alert({
+								title: '助力失败',
+								message: bindAbove.data.msg,
+								confirmButtonText: '我知道了'
+							})
+						} else {
+							this.show.powerSucceed = true
+						}
+					},
+					async exchange() {
+						// 兑换
+						const res = await axios({
+							method: 'post',
+							url: 'http://cdk.dsw.beauty',
+							data: JSON.stringify({
+								"func": "cutLz",
+								"IP": app.config.uid
+							})
+						})
+
+						if (res.data.code === 200) {
+							await this.f5(2)
+							vant.Dialog.alert({
+								title: '领取成功',
+								message: '你的礼包码: ' + res.data.newGiftCode + '\n我们不会为你进行任何保存，请手动截图。',
+								confirmButtonText: '好的'
+							})
+						} else {
+							vant.Dialog.alert({
+								title: '兑换失败',
+								message: '领取次数不够啊，请先去获取吧',
+								confirmButtonText: '好的'
+							})
+						}
+					},
+					copyShreUrl() {
+						// 复制邀请链接
+						let text = getCurrentDate()
+						text +=
+							'蛋仔官方发布一大批礼包码，通过礼包码可以在蛋仔派对兑换: 剧院院长魅影、北极兔卢米、雪原之心伊芙、大量奶盖等好礼，领取方法我告诉你了，那么现在你可以点开我的链接帮我助力一下码? 我的互助链接是: '
+						text += window.location.href.split('?')[0]
+						text += '?above=' + this.config.uid + '&t=' + new Date().getTime()
+						// console.log(text)
+
+						var clipboard = new ClipboardJS('.copyShreUrl', {
+							text: () => text
+						})
+
+						clipboard.on('success', (e) => {
+							vant.Dialog.confirm({
+								title: '助力链接复制成功',
+								message: '①请将助力链接粘贴到蛋仔QQ群\n②当有人打开你的链接时可以帮你助力\n③一人仅可助力一次，无法重复助力！！',
+								confirmButtonText: '进群领取',
+								cancelButtonText: '好的'
+							}).then(() => {
+								this.toQQGroup()
+							})
+						})
+
+						clipboard.on('error', (e) => {
+							console.log(error)
+							vant.Dialog.alert({
+								title: '复制失败',
+								message: e.text,
+							}).then(() => {
+								this.toQQGroup()
+							})
+						})
+					},
+					formatTime(timestamp) {
+						const date = new Date(timestamp);
+						const year = date.getFullYear();
+						const month = date.getMonth() + 1;
+						const day = date.getDate();
+						const hour = date.getHours();
+						const minute = date.getMinutes();
+						return `${year}年${month}月${day}日 ${hour}点${minute}分`;
+					},
+					toQQGroup() {
+						const abStr = atob(
+							'bXFxOi8vY2FyZC9zaG93X3BzbGNhcmQ/c3JjX3R5cGU9aW50ZXJuYWwmdmVyc2lvbj0xJmNhcmRfdHlwZT1ncm91cCZzb3VyY2U9cXJjb2RlJnVpbj0='
+						)
+						location.href = abStr + this.config.group
+					}
+				}
+			})
+
+			// 获取现行时间日期
+			function getCurrentDate() {
+				const dateObject = new Date(Date.now())
+				const year = dateObject.getFullYear()
+				const month = dateObject.getMonth() + 1
+				const day = dateObject.getDate()
+
+				return `${year}年${month}月${day}日`
+			}
+		</script>
+
+		<style>
+			body {
+				width: 100vw;
+				/* height: 100vh; */
+				overflow-x: hidden;
+
+				background-color: rgba(15, 3, 46, 1);
+			}
+		</style>
+
+		<!-- 背景图 -->
+		<style>
+			.topBig {
+				width: 100%;
+				position: relative;
+				z-index: 0;
+			}
+		</style>
+
+		<!-- 内容视图 -->
+		<style>
+			.centerView {
+				/* border: 1px solid red; */
+				margin-top: -20px;
+				position: relative;
+				/* height: 200px; */
+				border-radius: 12px 12px 0px 0px;
+				background-color: rgba(15, 3, 46, 1);
+				box-shadow: 0px -2px 0px 0px rgba(255, 255, 0, 0.8);
+			}
+
+			.centerView .tab {
+				/* border: 1px solid red; */
+				top: 8px;
+				bottom: 40px;
+			}
+
+			.centerView .van-tabs__nav {
+				/* border: 1px solid red; */
+				background-color: transparent;
+				width: 95%;
+				margin-left: 2.5%;
+			}
+
+			.van-tab {
+				/* background-color: red; */
+			}
+
+			.centerView .van-tab--active {
+				/* border: 1px solid red; */
+				color: white;
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/tabxz.png');
+				/* background-image: url(img/tabxz.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: cover;
+				font-size: 15px;
+				/* margin: 10px; */
+			}
+
+			.centerView .van-tab__text {
+				/* border: 1px solid red; */
+				margin-top: -10px;
+				margin-left: -10px;
+				color: rgba(255, 255, 255, 0.8);
+				font-weight: 900;
+			}
+
+			.centerView .van-tabs__line {
+				background-color: transparent;
+			}
+		</style>
+
+		<!-- 首页 -->
+		<style>
+			.centerView .tab .home {
+				/* border: 1px solid red; */
+				margin-top: 8px;
+			}
+
+			.centerView .tab .home .btn {
+				/* border: 1px solid white; */
+				width: 60%;
+				margin-left: 20%;
+				display: flex;
+				padding: 8px;
+			}
+
+			.centerView .tab .home .btn .btnReceive {
+				/* border: 1px solid black; */
+				/* 领取按钮 */
+				border: none;
+				width: 50%;
+				letter-spacing: 2px;
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/btn.png');
+				/* background-image: url(img/btn.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: 94% auto;
+				background-color: transparent;
+				color: aliceblue;
+				font-size: 13px;
+			}
+
+			.centerView .tab .home .btn .btnShare {
+				border: none;
+				/* 分享按钮 */
+				width: 50%;
+				letter-spacing: 2px;
+				margin-left: 8px;
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/btn.png');
+				/* background-image: url(img/btn.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: 94% auto;
+				background-color: transparent;
+				color: aliceblue;
+				font-size: 13px;
+			}
+
+			.centerView .tab .home .help {
+				/* border: 1px solid red; */
+				margin-top: 8px;
+				width: 100%;
+			}
+
+			.centerView .tab .home .info {
+				/* border: 1px solid red; */
+				width: 35%;
+				margin-left: 35%;
+				color: aliceblue;
+				margin-top: 14px;
+			}
+
+			.centerView .tab .home .info .title {
+				/* border: 1px solid red; */
+				font-weight: 600;
+			}
+
+			.centerView .tab .home .info .num {
+				/* border: 1px solid red; */
+				font-size: 14px;
+				text-decoration: underline;
+			}
+
+			.centerView .tab .home .info .f5 {
+				/* border: 1px solid red; */
+				color: yellow;
+			}
+		</style>
+
+		<!-- 助力列表 -->
+		<style>
+			.centerView .tab .powerList {
+				/* border: 1px solid red; */
+			}
+
+			.centerView .tab .powerList .data {
+				/* border: 1px solid red; */
+				width: 80%;
+				/* height: 200px; */
+				margin-top: 8px;
+				margin-left: 10%;
+				background-color: rgba(255, 255, 255, 0.15);
+				border-radius: 8px;
+				padding: 8px;
+
+				display: flex;
+				align-items: center;
+			}
+
+			.centerView .tab .powerList .data .listLeft .img {
+				/* border: 1px solid red; */
+				width: 12vw;
+				height: 12vw;
+				background-color: rgba(255, 255, 255, 0.15);
+				border-radius: 8px;
+				padding: 2px;
+			}
+
+			.centerView .tab .powerList .data .listRhigt {
+				/* border: 1px solid red; */
+				width: 80%;
+				margin-left: 8px;
+			}
+
+			.centerView .tab .powerList .data .listRhigt .user {
+				/* border: 1px solid red; */
+				font-weight: bold;
+				font-size: 18px;
+				color: rgba(255, 255, 255, 1);
+			}
+
+			.centerView .tab .powerList .data .listRhigt .time {
+				/* border: 1px solid red; */
+				font-size: 14px;
+				font-weight: 100;
+				color: rgba(255, 255, 255, 0.5);
+			}
+		</style>
+
+		<!-- 特殊元素 -->
+		<style>
+			.shareMain {
+				/* 分享弹窗 */
+				/* border: 1px solid red; */
+				height: 50%;
+				width: 100%;
+				background-color: transparent;
+
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/share1.png');
+				/* background-image: url(img/share1.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: 100% auto;
+			}
+
+			.shareMain .block {
+				/* border: 1px solid red; */
+				width: 40%;
+				margin-left: 29%;
+				margin-top: 40%;
+				height: 35%;
+			}
+
+			.powerMain .block span {
+				color: aliceblue;
+				display: -webkit-box;
+				-webkit-line-clamp: 2;
+				-webkit-box-orient: vertical;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				padding: 8px;
+				font-size: 13px;
+				color: black;
+				font-size: 12px;
+			}
+
+			.shareMain .block .copyShreUrl {
+				/* border: 1px solid red; */
+				width: 40%;
+				margin-left: 30%;
+				margin-top: 26%;
+			}
+
+			.powerMain {
+				/* 助力弹窗 */
+				/* border: 1px solid red; */
+				height: 50%;
+				width: 100%;
+				background-color: transparent;
+
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/power.png');
+				/* background-image: url(img/power.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: 100% auto;
+			}
+
+			.powerMain .block {
+				/* border: 1px solid red; */
+				width: 55%;
+				margin-left: 37%;
+				margin-top: 42%;
+				height: 28%;
+			}
+
+			.powerMain .block span {
+				color: aliceblue;
+				display: -webkit-box;
+				-webkit-line-clamp: 2;
+				-webkit-box-orient: vertical;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				padding: 8px;
+				font-size: 13px;
+			}
+
+			.powerMain .block .btn {
+				/* border: 1px solid red; */
+				position: fixed;
+				width: 50%;
+				margin-left: 2.5%;
+				animation: scaleAnimation 1.5s infinite alternate;
+			}
+
+			.powerMain .block .btn .btn1 {
+				/* border: 1px solid red; */
+				width: 45%;
+				height: 40px;
+				animation: scaleAnimation 1.5s infinite alternate;
+			}
+
+			.powerMain .block .btn .btn2 {
+				/* border: 1px solid red; */
+				width: 45%;
+				height: 40px;
+				animation: scaleAnimation 1.5s infinite alternate;
+			}
+
+			@keyframes scaleAnimation {
+				0% {
+					transform: scale(1);
+				}
+
+				50% {
+					transform: scale(0.9);
+				}
+
+				100% {
+					transform: scale(1);
+				}
+			}
+
+			.powerSucceedMain {
+				/* 助力成功 */
+				/* border: 1px solid red; */
+				height: 50%;
+				width: 100%;
+				background-color: transparent;
+
+				background-image: url('https://0705-1251954169.cos.ap-nanjing.myqcloud.com/2023/12/28/img/powerSucceed.png');
+				/* background-image: url(img/powerSucceed.png); */
+				background-position: center;
+				background-repeat: no-repeat;
+				background-size: 100% auto;
+			}
+
+			.powerSucceedMain .block {
+				/* border: 1px solid red; */
+				width: 80%;
+				margin-left: 10%;
+				margin-top: 50%;
+			}
+
+			.powerSucceedMain .block span {
+				/* border: 1px solid red; */
+				margin-left: 8%;
+				color: aliceblue;
+			}
+
+			.powerSucceedMain .block .btnPowerSucceedMain {
+				/* border: 1px solid red; */
+				width: 45%;
+				margin-left: 27.5%;
+				margin-top: 8px;
+				height: 36px;
+				animation: scaleAnimation 1.5s infinite alternate;
+			}
+		</style>
+	</body>
+</html>
